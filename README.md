@@ -38,3 +38,5 @@ Sylvester (James Joseph Sylvester): Representing the Symmetric Matrix support an
 
 Banach (Stefan Banach): Representing the Fixed-Point Convergence and the contractive nature of the relaxed update rule.
 
+
+When you run the benchmark, you'll notice that Sylvach (global-mean style) significantly outperforms Pairwise Gossip in wall-clock time. This is because Sylvach uses a "dense" contraction mapping (updating all nodes at once), whereas Pairwise Gossip is a "sparse" contraction (updating only two nodes at a time).
