@@ -4,41 +4,28 @@ Single-file benchmark comparing relaxed over-relaxation consensus against classi
 
 Sylvach leverages **first-principles linear algebra and contraction mappings** to accelerate convergence. It demonstrates iteration counts largely **independent of network size** for suitable α, while pairwise gossip scales as ~O(n log n) iterations.
 
----
 
-## 🔹 Mathematical Overview
+## 🔹 Key Features
 
-Let \(X_i \in \mathbb{R}^d\) denote the state of node \(i\), with global average:
+- **Dual Consensus Methods**
+  - **Random Pairwise Gossip** — classic sparse, fully decentralized baseline (pairwise averaging)
+  - **Sylvach (Relaxed Over-Relaxation)** — vectorized global-mean style updates with tunable relaxation parameter α  
+    → supports both over-relaxation (α > 1) and under-relaxation (α < 1)
 
-\[
-X_\text{avg} = \frac{1}{N} \sum_{i=1}^N X_i
-\]
+- **Multi-State Support**
+  - Scalar, vector, and symmetric matrix node states
+  - Same core algorithm works for high-dimensional states (no code changes needed)
 
-The goal of distributed consensus is for all nodes to converge to \(X_\text{avg}\), i.e.,  
+- **Large-Scale Capable**
+  - Efficient NumPy vectorization
+  - Comfortably handles **10k – 500k+ nodes** in scalar mode
+  - Still feasible memory & runtime even for large N
 
-\[
-\lim_{t \to \infty} X_i^{(t)} = X_\text{avg}, \quad \forall i
-\]
+- **α Parameter Sweep**
+  - Test multiple relaxation factors in one benchmark run
+  - Explore trade-off between convergence speed and stability
 
-### 1️⃣ Random Pairwise Gossip
-
-Classic gossip selects disjoint random pairs \((i,j)\) each iteration and averages them:
-
-\[
-X_i, X_j \gets \frac{X_i + X_j}{2}
-\]
-
-- Sparse, local communication  
-- Iteration complexity: ~O(n log n)  
-- Residual per iteration:
-
-\[
-r^{(t)} = \max_i \| X_i^{(t)} - X_\text{avg} \|
-\]
-
-```python
-for i in range(0, n-1, 2):
-    a, b = idx[i], idx[i+1]
-    avg = (X[a] + X[b]) / 2
-    X[a] = avg
-    X[b] = avg
+- **Residual Tracking & Convergence Monitoring**
+  - Per-iteration residual:  
+    ```math
+    \max_i \| \mathbf{x}_i - \mathbf{x}_\text{avg} \|
