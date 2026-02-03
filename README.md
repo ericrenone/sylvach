@@ -1,8 +1,6 @@
-# sylvach
+# Sylvach: Large-Scale Distributed Consensus Benchmark
+
 Single-file benchmark comparing relaxed over-relaxation consensus against classic random pairwise gossip.
-
-# Sylvach vs Pairwise Gossip – Large-Scale Distributed Consensus Benchmark
-
 
 Sylvach leverages **first-principles linear algebra and contraction mappings** to accelerate convergence. It demonstrates iteration counts largely **independent of network size** for suitable α, while pairwise gossip scales as ~O(n log n) iterations.
 
