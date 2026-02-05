@@ -11,7 +11,7 @@
 - **Stability tension** (distribution of nodes).
 - **SHA-256 state delta** (cryptographic fingerprint of system state).
 
-**Designed for:** Federated learning (FL) and decentralized optimization, with a focus on **low-resource, large-scale networks**
+**Designed for:** Federated learning (FL) and decentralized optimization, with a focus on **low-resource, large-scale networks.**
 
 ---
 
