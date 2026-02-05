@@ -11,14 +11,14 @@
 - **Stability tension** (distribution of nodes).
 - **SHA-256 state delta** (cryptographic fingerprint of system state).
 
-**Designed for:** Federated learning (FL) and decentralized optimization, with a focus on **low-resource, large-scale networks.**
+**Designed for:** Federated learning (FL) and decentralized optimization in **low-resource, large-scale networks.**
 
 ---
 
-## Key Features
+## Features
+
 ### 1. **Fixed-Point Contraction Mapping**
 - Uses **Banach fixed-point theorem** to model node convergence.
-- Configurable **over-relaxation factor** (\(\alpha = 1.12\)) and **contraction constant** (\(k = 0.88\)).
 
 ### 2. **2D Phase-Space Visualization**
 - **Contour map** of the potential field.
@@ -34,7 +34,6 @@
 
 ### 4. **Low-Resource Design**
 - Optimized for **communication, memory, and energy efficiency**.
-- Aligns with your research on **dismantling the "compute wall"** in FL.
 
 ### 5. **Production-Ready**
 - Smooth animation, fixed scaling, and clean visuals.
