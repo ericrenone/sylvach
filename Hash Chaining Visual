@@ -1,0 +1,144 @@
+import hashlib
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+import os
+
+# ===================== CONFIGURATION =====================
+N_NODES = 10_000
+ALPHA = 0.05                # Convergence strength
+NOISE_STD = 0.35            # Stochastic noise
+INTERVAL = 30               # Animation interval (ms)
+RADIUS = 12                 # Initial circle radius
+MAX_LOG_LINES = 40
+GROUPS = 10                 # Distinct node groups per 1k nodes
+CENTER_AURA_MAX = 150       # Max aura size for holographic center
+CENTER_AURA_MIN = 100       # Min aura size for pulsing effect
+CENTER_AURA_SPEED = 0.05    # Speed of pulsing
+
+class LavaHashSimulation:
+    def __init__(self):
+        # --- True random seed ---
+        seed = int.from_bytes(os.urandom(8), 'big') % (2**32)
+        np.random.seed(seed)
+        print(f"[INFO] True random seed: {seed}")
+
+        # --- Initialize nodes in circle ---
+        angles = np.random.uniform(0, 2*np.pi, N_NODES)
+        radii = RADIUS * np.sqrt(np.random.uniform(0, 1, N_NODES))
+        x = radii * np.cos(angles)
+        y = radii * np.sin(angles)
+        self.states = np.column_stack((x, y)).astype(np.float32)
+
+        self.prev_hash = b"GENESIS"
+        self.history = []
+        self.global_index = 0
+
+        # --- Figure setup ---
+        self.fig, (self.ax_sim, self.ax_log) = plt.subplots(
+            1, 2, figsize=(16, 8),
+            facecolor='#0a0a0a',
+            gridspec_kw={'width_ratios': [1.5, 1]}
+        )
+        self.fig.subplots_adjust(left=0.05, right=0.95, bottom=0.05, top=0.9)
+
+        # --- Simulation axes ---
+        self.ax_sim.set_facecolor('#000000')
+        self.ax_sim.set_xlim(-RADIUS-5, RADIUS+5)
+        self.ax_sim.set_ylim(-RADIUS-5, RADIUS+5)
+        self.ax_sim.axis('off')
+        self.ax_sim.set_title("VIBRANT PHYSICAL ENTROPY (10K NODES)", color='#00FFAD', fontsize=14)
+
+        # --- Ledger axes ---
+        self.ax_log.set_facecolor('#050505')
+        self.ax_log.axis('off')
+        self.hash_text = self.ax_log.text(
+            0.05, 0.95, "", color='#00FFAD',
+            family='monospace', fontsize=8, va='top', ha='left'
+        )
+        self.ax_log.set_title("DIGITAL LEDGER (SHA-256 CHAIN)", color='#00FFAD', fontsize=14)
+
+        # --- Vibrant contrast colors per group ---
+        colors = np.zeros(N_NODES)
+        nodes_per_group = 10  # 10 nodes per group
+        for g in range(GROUPS):
+            for k in range(0, 1000, nodes_per_group):
+                start = g*1000 + k
+                end = start + nodes_per_group
+                if end > N_NODES: end = N_NODES
+                colors[start:end] = g / GROUPS + np.random.uniform(0, 0.05, end-start)
+
+        # --- Initial scatter ---
+        distances = np.hypot(self.states[:,0], self.states[:,1])
+        self.scatter = self.ax_sim.scatter(
+            self.states[:,0], self.states[:,1],
+            s=2.0,
+            c=colors + distances/np.max(distances)*0.3,
+            cmap='plasma',
+            edgecolors='black',
+            linewidths=0.05,
+            alpha=0.9,
+            animated=True
+        )
+
+        # --- Center holographic invariant ---
+        self.center_aura_size = CENTER_AURA_MIN
+        self.center_aura_growing = True
+        self.center_holo = self.ax_sim.scatter(
+            0, 0,
+            s=self.center_aura_size,
+            c='black',
+            edgecolors='cyan',
+            linewidths=1.2,
+            alpha=0.8,
+            zorder=5
+        )
+
+    def update(self, frame):
+        # --- Physics: convergence + stochastic noise ---
+        self.states += ALPHA * (0 - self.states)
+        self.states += np.random.normal(0, NOISE_STD, self.states.shape)
+
+        # --- Update node scatter ---
+        distances = np.hypot(self.states[:,0], self.states[:,1])
+        self.scatter.set_offsets(self.states)
+        colors = self.scatter.get_array() + np.random.uniform(0, 0.005, N_NODES)
+        self.scatter.set_array(colors)
+
+        # --- Hash chain ---
+        raw_data = self.states.tobytes() + self.prev_hash
+        current_hash = hashlib.sha256(raw_data).hexdigest()
+        self.prev_hash = current_hash.encode()
+
+        # --- Update ledger waterfall ---
+        self.history.append((self.global_index, current_hash))
+        self.global_index += 1
+        if len(self.history) > MAX_LOG_LINES:
+            self.history = self.history[-MAX_LOG_LINES:]
+        log_display = "\n".join([f"[{idx:05d}] {h}" for idx, h in self.history])
+        self.hash_text.set_text(log_display)
+
+        # --- Animate holographic center aura ---
+        if self.center_aura_growing:
+            self.center_aura_size += CENTER_AURA_SPEED * (CENTER_AURA_MAX - CENTER_AURA_MIN)
+            if self.center_aura_size >= CENTER_AURA_MAX:
+                self.center_aura_growing = False
+        else:
+            self.center_aura_size -= CENTER_AURA_SPEED * (CENTER_AURA_MAX - CENTER_AURA_MIN)
+            if self.center_aura_size <= CENTER_AURA_MIN:
+                self.center_aura_growing = True
+        self.center_holo.set_sizes([self.center_aura_size])
+
+        return self.scatter, self.hash_text, self.center_holo
+
+    def run(self):
+        self.ani = animation.FuncAnimation(
+            self.fig, self.update, interval=INTERVAL,
+            blit=True, cache_frame_data=False
+        )
+        plt.show()
+
+
+if __name__ == "__main__":
+    sim = LavaHashSimulation()
+    sim.run()
