@@ -1,0 +1,152 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import time
+import os
+
+# ----------------------------
+# True random seed
+# ----------------------------
+seed = int.from_bytes(os.urandom(4), 'little')
+rng = np.random.default_rng(seed)
+print(f"Random Seed: {seed}")
+
+# ----------------------------
+# Simulation parameters
+# ----------------------------
+n_particles = 50_000       # number of particles
+steps = 200                # simulation steps
+q_shift = 16               # fixed-point precision
+alpha = 0.05               # damping factor
+noise_std = 0.01           # noise strength
+
+# ----------------------------
+# Initialize 3D particle positions
+# ----------------------------
+phi = rng.uniform(0, 2*np.pi, n_particles)
+costheta = rng.uniform(-1, 1, n_particles)
+radius = 8 * np.cbrt(rng.uniform(0,1,n_particles))
+theta = np.arccos(costheta)
+positions = np.stack([
+    radius * np.sin(theta) * np.cos(phi),
+    radius * np.sin(theta) * np.sin(phi),
+    radius * np.cos(theta)
+], axis=1)
+
+# ----------------------------
+# Fixed-point utilities
+# ----------------------------
+def to_fixed(v):
+    return np.int32(v * (1 << q_shift))
+
+def fixed_mul(a, b):
+    return np.int32((np.int64(a) * b) >> q_shift)
+
+def from_fixed(v):
+    return v.astype(np.float64) / (1 << q_shift)
+
+# ----------------------------
+# Initialize states
+# ----------------------------
+state_fp = positions.copy()
+state_fixed = to_fixed(positions)
+fixed_alpha = to_fixed(alpha)
+
+# ----------------------------
+# Tracking arrays
+# ----------------------------
+latency_fp = []
+latency_fixed = []
+numerical_error = []
+mean_distance = []
+
+# ----------------------------
+# Setup live plot
+# ----------------------------
+plt.ion()
+fig, axes = plt.subplots(3,1,figsize=(10,12))
+
+# Top: Step Time
+line_fp_time, = axes[0].plot([], [], color='orange', lw=2, label='FP64 (ms)')
+line_fixed_time, = axes[0].plot([], [], color='cyan', lw=2, label='Fixed-Point (ms)')
+axes[0].set_ylabel("Step Time (ms)")
+axes[0].legend()
+axes[0].grid(alpha=0.3)
+
+# Middle: Numerical Error
+line_error, = axes[1].plot([], [], color='magenta', lw=2)
+axes[1].set_ylabel("Average Numerical Error")
+axes[1].grid(alpha=0.3)
+
+# Bottom: Stability (mean distance)
+line_distance, = axes[2].plot([], [], color='lime', lw=2)
+axes[2].set_xlabel("Simulation Step")
+axes[2].set_ylabel("Mean Particle Distance")
+axes[2].grid(alpha=0.3)
+
+# ----------------------------
+# Simulation loop
+# ----------------------------
+for step in range(steps):
+    # Generate noise
+    noise_fp = rng.normal(0, noise_std, state_fp.shape)
+    noise_fixed = (noise_fp * (1 << q_shift)).astype(np.int32)
+
+    # FP64 update
+    t0 = time.perf_counter()
+    state_fp += -alpha * state_fp + noise_fp
+    latency_fp.append((time.perf_counter() - t0) * 1000)
+
+    # Fixed-point update
+    t1 = time.perf_counter()
+    state_fixed += fixed_mul(fixed_alpha, -state_fixed) + noise_fixed
+    latency_fixed.append((time.perf_counter() - t1) * 1000)
+
+    # Numerical error
+    error = np.mean(np.linalg.norm(state_fp - from_fixed(state_fixed), axis=1))
+    numerical_error.append(error)
+
+    # Mean distance (stability)
+    mean_dist = np.mean(np.linalg.norm(state_fp, axis=1))
+    mean_distance.append(mean_dist)
+
+    # Update plots dynamically every 5 steps
+    if step % 5 == 0 or step == steps-1:
+        # Top: step time
+        line_fp_time.set_data(range(len(latency_fp)), latency_fp)
+        line_fixed_time.set_data(range(len(latency_fixed)), latency_fixed)
+        axes[0].set_xlim(0, steps)
+        axes[0].set_ylim(0, max(max(latency_fp), max(latency_fixed))*1.5)
+
+        # Middle: numerical error
+        line_error.set_data(range(len(numerical_error)), numerical_error)
+        axes[1].set_xlim(0, steps)
+        axes[1].set_ylim(0, max(numerical_error)*1.5)
+
+        # Bottom: mean distance
+        line_distance.set_data(range(len(mean_distance)), mean_distance)
+        axes[2].set_xlim(0, steps)
+        axes[2].set_ylim(min(mean_distance)*0.9, max(mean_distance)*1.1)
+
+        # Dynamic title
+        fig.suptitle(
+            f"Step {step+1}/{steps} | Random Seed {seed}\n"
+            f"Avg FP64 Time: {np.mean(latency_fp):.3f} ms | "
+            f"Avg Fixed Time: {np.mean(latency_fixed):.3f} ms | "
+            f"Max Error: {max(numerical_error):.5f}",
+            fontsize=10
+        )
+        plt.pause(0.01)
+
+plt.ioff()
+plt.show()
+
+# ----------------------------
+# Final metrics
+# ----------------------------
+print("\n==== Final Metrics ====")
+print(f"Random Seed: {seed}")
+print(f"Average FP64 Step Time: {np.mean(latency_fp):.3f} ms")
+print(f"Average Fixed-Point Step Time: {np.mean(latency_fixed):.3f} ms")
+print(f"Speed-Up (FP64 / Fixed): {np.mean(latency_fp)/np.mean(latency_fixed):.2f}x")
+print(f"Max Numerical Error: {max(numerical_error):.5f}")
+print(f"Final Mean Distance (Stability): {mean_distance[-1]:.5f}")
