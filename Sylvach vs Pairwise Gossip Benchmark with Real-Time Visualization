@@ -3,9 +3,19 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from dataclasses import dataclass
-import secrets
+import hashlib
 
-# ---------------- CONFIG ----------------
+# ---------------- IDENTITY & CRYPTO ----------------
+def get_sha256(data_bytes):
+    return hashlib.sha256(data_bytes).hexdigest()
+
+def generate_sylvach_identity():
+    """Generates the master seed from the SHA-256 hash of 'sylvach'."""
+    hex_digest = get_sha256(b"sylvach")
+    # Convert hex to integer for NumPy seeding
+    seed = int(hex_digest[:16], 16) % (2**32)
+    return hex_digest, seed
+
 @dataclass
 class TrackerConfig:
     n_nodes: int = 1500
@@ -13,124 +23,128 @@ class TrackerConfig:
     alpha: float = 0.12        
     gossip_scale: float = 0.4  
     noise_std: float = 8.0     
-    n_steps: int = 300
-    interval: int = 50
-    master_seed: int = secrets.randbits(32) 
+    interval: int = 40         
+    epsilon: float = 1e-8      # High-precision stop condition
+    start_hash, master_seed = generate_sylvach_identity()
 
-# ---------------- CONSENSUS LOGIC ----------------
+# ---------------- VECTORIZED LOGIC ----------------
 def sylvach_step(states, alpha):
-    # Global Mean: Every node updates based on the average
     mean = np.mean(states, axis=0)
     states += alpha * (mean - states)
-    # Communication cost: N updates per step
     return states, len(states)
 
 def gossip_step(states, scale):
-    # Pairwise: Nodes only update in pairs
     n = len(states)
     idx = np.random.permutation(n)
-    updates = 0
-    for i in range(0, n - 1, 2):
-        a, b = idx[i], idx[i+1]
-        avg = (states[a] + states[b]) / 2
-        states[a] += scale * (avg - states[a])
-        states[b] += scale * (avg - states[b])
-        updates += 2 
-    return states, updates
+    if n % 2 != 0: idx = idx[:-1]
+    a, b = idx[::2], idx[1::2]
+    avg = (states[a] + states[b]) / 2
+    states[a] += scale * (avg - states[a])
+    states[b] += scale * (avg - states[b])
+    return states, len(idx)
 
-# ---------------- VISUALIZER ----------------
-class ComparisonTracker:
+# ---------------- INFINITE VERIFICATION TRACKER ----------------
+class PerpetualConsensusTracker:
     def __init__(self, cfg: TrackerConfig):
         self.cfg = cfg
         np.random.seed(cfg.master_seed)
-        initial_pool = np.random.randn(cfg.n_nodes, cfg.dim) * cfg.noise_std
         
+        initial_pool = np.random.randn(cfg.n_nodes, cfg.dim) * cfg.noise_std
         self.syl_states = initial_pool.copy()
         self.gos_states = initial_pool.copy()
         
-        self.history = {
-            'syl_err': [], 'gos_err': [], 
-            'syl_comm': [0], 'gos_comm': [0]
-        }
+        self.history = {'syl_err': [], 'gos_err': [], 'syl_comm': [0], 'gos_comm': [0]}
+        self.is_finished = False
 
         plt.style.use('dark_background')
-        self.fig = plt.figure(figsize=(16, 10))
-        gs = self.fig.add_gridspec(2, 2, height_ratios=[2, 1])
+        self.fig = plt.figure(figsize=(16, 11))
+        gs = self.fig.add_gridspec(3, 2, height_ratios=[2, 1, 0.15])
         
         self.ax_syl = self.fig.add_subplot(gs[0, 0])
         self.ax_gos = self.fig.add_subplot(gs[0, 1])
         self.ax_met = self.fig.add_subplot(gs[1, :])
+        self.ax_hash = self.fig.add_subplot(gs[2, :])
+        self.ax_hash.axis('off')
 
-        # FIX: Added 'c=[]' to suppress the UserWarning
-        self.scat_syl = self.ax_syl.scatter([], [], s=5, cmap='winter', c=[], alpha=0.5)
-        self.scat_gos = self.ax_gos.scatter([], [], s=5, cmap='autumn', c=[], alpha=0.5)
+        self.scat_syl = self.ax_syl.scatter([0], [0], c=[0], s=5, cmap='winter', alpha=0.5)
+        self.scat_gos = self.ax_gos.scatter([0], [0], c=[0], s=5, cmap='autumn', alpha=0.5)
 
-        for ax, t in zip([self.ax_syl, self.ax_gos], ["Sylvach (Global Broadcast)", "Gossip (P2P Exchange)"]):
+        for ax, t in zip([self.ax_syl, self.ax_gos], ["Sylvach Protocol", "Gossip Protocol"]):
             ax.set_title(t, fontsize=14, color='white', weight='bold')
-            ax.set_xlim(-15, 15); ax.set_ylim(-15, 15)
-            ax.set_xlabel("Latent X"); ax.set_ylabel("Latent Y")
 
-        self.line_syl, = self.ax_met.plot([], [], color='#00f2ff', label='Sylvach Residual', lw=2)
-        self.line_gos, = self.ax_met.plot([], [], color='#ff0055', label='Gossip Residual', lw=2)
+        self.line_syl, = self.ax_met.plot([], [], color='#00f2ff', label='Sylvach Error', lw=2)
+        self.line_gos, = self.ax_met.plot([], [], color='#ff0055', label='Gossip Error', lw=2)
+        self.ax_met.set_ylabel("Linear Residual")
+        self.ax_met.legend(loc='upper right', frameon=False)
         
-        self.ax_met.set_title(f"Seed: {cfg.master_seed} | Nodes: {cfg.n_nodes}", fontsize=10, loc='right', color='gray')
-        self.ax_met.set_ylabel("Max System Error")
-        self.ax_met.set_xlabel("Steps (Real-Time)")
-        self.ax_met.legend(loc='upper right')
-        
-        # Text for real-time stats
         self.stats_text = self.ax_met.text(0.02, 0.05, '', transform=self.ax_met.transAxes, color='white', fontfamily='monospace')
+        self.hash_display = self.ax_hash.text(0.5, 0.5, '', transform=self.ax_hash.transAxes, 
+                                              ha='center', va='center', fontfamily='monospace', fontsize=9)
 
     def update(self, frame):
-        # Step Logic + Communication Tracking
-        self.syl_states, s_comm = sylvach_step(self.syl_states, self.cfg.alpha)
-        self.gos_states, g_comm = gossip_step(self.gos_states, self.cfg.gossip_scale)
+        if self.is_finished:
+            return [self.scat_syl, self.scat_gos, self.line_syl, self.line_gos, self.stats_text]
 
-        # Residual Calculation
+        # Physics
+        self.syl_states, s_c = sylvach_step(self.syl_states, self.cfg.alpha)
+        self.gos_states, g_c = gossip_step(self.gos_states, self.cfg.gossip_scale)
+
+        # Residuals
         err_s = np.max(np.linalg.norm(self.syl_states - np.mean(self.syl_states, axis=0), axis=1))
         err_g = np.max(np.linalg.norm(self.gos_states - np.mean(self.gos_states, axis=0), axis=1))
-        
+        delta = abs(err_g - err_s)
+
         self.history['syl_err'].append(err_s)
         self.history['gos_err'].append(err_g)
-        self.history['syl_comm'].append(self.history['syl_comm'][-1] + s_comm)
-        self.history['gos_comm'].append(self.history['gos_comm'][-1] + g_comm)
+        self.history['syl_comm'].append(self.history['syl_comm'][-1] + s_c)
+        self.history['gos_comm'].append(self.history['gos_comm'][-1] + g_c)
 
-        # Update Scatters
+        # Cryptographic Verification
+        current_state_bytes = self.syl_states.tobytes() + self.gos_states.tobytes()
+        current_hash = get_sha256(current_state_bytes)
+
+        # Visuals
         self.scat_syl.set_offsets(self.syl_states[:, :2])
         self.scat_syl.set_array(np.linalg.norm(self.syl_states, axis=1))
         self.scat_gos.set_offsets(self.gos_states[:, :2])
         self.scat_gos.set_array(np.linalg.norm(self.gos_states, axis=1))
-
-        # Update Lines
+        
         xdata = range(len(self.history['syl_err']))
         self.line_syl.set_data(xdata, self.history['syl_err'])
         self.line_gos.set_data(xdata, self.history['gos_err'])
+        self.ax_met.set_xlim(0, max(60, len(xdata)))
+        if frame == 0: self.ax_met.set_ylim(0, err_s * 1.1)
+
+        # UI
+        self.stats_text.set_text(f"DELTA: {delta:.10f} | STEP: {frame}\n"
+                                 f"SYL COMM: {self.history['syl_comm'][-1]:,}\n"
+                                 f"GOS COMM: {self.history['gos_comm'][-1]:,}")
         
-        # Adjust Y-axis for residual plot dynamically
-        if frame == 0:
-            self.ax_met.set_ylim(0, err_s * 1.2)
-        self.ax_met.set_xlim(0, max(40, len(xdata)))
+        self.hash_display.set_text(f"START HASH: {self.cfg.start_hash}\n"
+                                   f"CURRENT HASH: {current_hash}")
+        
+        # Camera
+        s_m, g_m = np.mean(self.syl_states, axis=0), np.mean(self.gos_states, axis=0)
+        limit = max(err_s, err_g, 0.4) * 1.6
+        self.ax_syl.set_xlim(s_m[0]-limit, s_m[0]+limit); self.ax_syl.set_ylim(s_m[1]-limit, s_m[1]+limit)
+        self.ax_gos.set_xlim(g_m[0]-limit, g_m[0]+limit); self.ax_gos.set_ylim(g_m[1]-limit, g_m[1]+limit)
 
-        # Update Stats Text
-        self.stats_text.set_text(
-            f"SYL Total Comm: {self.history['syl_comm'][-1]:,}\n"
-            f"GOS Total Comm: {self.history['gos_comm'][-1]:,}\n"
-            f"Error Ratio (G/S): {err_g/err_s:.2f}x"
-        )
+        # INFINITE STOP TRIGGER
+        if delta < self.cfg.epsilon and frame > 20:
+            self.is_finished = True
+            self.hash_display.set_color('#00ff00')
+            print(f"[*] TOTAL CONVERGENCE AT STEP {frame}")
+            print(f"[*] FINAL HASH: {current_hash}")
+            self.ani.event_source.stop()
 
-        # Visibility Zoom
-        limit = max(err_s, err_g, 0.2) * 1.8
-        self.ax_syl.set_xlim(-limit, limit); self.ax_syl.set_ylim(-limit, limit)
-        self.ax_gos.set_xlim(-limit, limit); self.ax_gos.set_ylim(-limit, limit)
-
-        return [self.scat_syl, self.scat_gos, self.line_syl, self.line_gos, self.stats_text]
+        return [self.scat_syl, self.scat_gos, self.line_syl, self.line_gos, self.stats_text, self.hash_display]
 
     def run(self):
-        ani = animation.FuncAnimation(self.fig, self.update, frames=self.cfg.n_steps, 
-                                     interval=self.cfg.interval, blit=True)
-        plt.tight_layout()
+        # frames=None makes the generator infinite
+        self.ani = animation.FuncAnimation(self.fig, self.update, frames=None, 
+                                          interval=self.cfg.interval, blit=True, cache_frame_data=False)
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
         plt.show()
 
 if __name__ == "__main__":
-    print("[*] Launching Convergence Tracker with Master Seed Symmetry...")
-    ComparisonTracker(TrackerConfig()).run()
+    PerpetualConsensusTracker(TrackerConfig()).run()
